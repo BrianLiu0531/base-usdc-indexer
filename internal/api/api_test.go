@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -117,4 +118,18 @@ func TestRejectsBadRequests(t *testing.T) {
 	get(t, srv.URL+"/v1/addresses/"+alice.Hex()+"/transfers?limit=1000", 400, nil)
 	get(t, srv.URL+"/v1/addresses/"+alice.Hex()+"/transfers?before=yesterday", 400, nil)
 	get(t, srv.URL+"/healthz", 200, nil)
+	get(t, srv.URL+"/nope", 404, nil)
+}
+
+func TestServesTheDashboard(t *testing.T) {
+	srv := setup(t)
+	res, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 || res.Header.Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(string(body), "<title>USDC Indexer</title>") {
+		t.Fatalf("dashboard: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
 }

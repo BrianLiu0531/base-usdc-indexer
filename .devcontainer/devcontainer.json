@@ -6,10 +6,11 @@
   },
   "forwardPorts": [8080],
   "portsAttributes": {
-    "8080": { "label": "Indexer API", "onAutoForward": "notify" }
+    "8080": { "label": "Indexer dashboard", "onAutoForward": "openBrowser" }
   },
-  "postCreateCommand": "cp -n .env.example .env && docker compose up -d db && go mod download",
-  "postAttachCommand": "echo 'Ready. Try: go test ./...   or   docker compose up --build   then open the forwarded port 8080 at /v1/status'",
+  "postCreateCommand": "cp -n .env.example .env && go mod download",
+  "postStartCommand": "docker compose up -d --build",
+  "postAttachCommand": "echo 'The indexer is starting (first build takes about a minute). Open the Ports tab and click the globe icon next to port 8080. Logs: docker compose logs -f indexer   Tests: go test ./...'",
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"]

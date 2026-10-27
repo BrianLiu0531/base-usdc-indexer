@@ -70,6 +70,7 @@ Blocks at or below `finalized` cannot reorg, so the backfill fetches only bounda
 
 | Endpoint | Description |
 |---|---|
+| `GET /` | Live dashboard: sync progress, balances, reconciliation and recent transfers per watched address |
 | `GET /v1/status` | Chain heights, indexed block, lag, watched addresses |
 | `GET /v1/addresses/{address}` | Finalized totals, indexed balance and the last reconciliation result |
 | `GET /v1/addresses/{address}/transfers?limit=25&before=<block>:<logIndex>` | Transfers newest first, with direction, amount, status and keyset pagination |
@@ -96,14 +97,13 @@ GET /v1/addresses/0x2E78bcdCbF7ba1ADc2252819d6134d6549960f3A
 
 ## Running it
 
-**In the browser:** click *Open in GitHub Codespaces* above. The database starts automatically. Then run `go test ./...` or `docker compose up --build` and open the forwarded port 8080 at `/v1/status`.
+**In the browser:** click *Open in GitHub Codespaces* above. The database and indexer start automatically (the first build takes a minute or two). Then open the **Ports** tab and click the globe icon next to port 8080 to see the live dashboard. Run the tests with `go test ./...`.
 
 **Locally:**
 
 ```bash
 cp .env.example .env          # set WATCH_ADDRESSES; RPC_URLS defaults to the public Base Sepolia endpoint
-docker compose up --build     # PostgreSQL + indexer on http://localhost:8080
-curl localhost:8080/v1/status
+docker compose up --build     # PostgreSQL + indexer; dashboard on http://localhost:8080
 ```
 
 To run without Docker, start only the database (`docker compose up -d db`), then run `go run ./cmd/indexer` with the variables from `.env` exported.

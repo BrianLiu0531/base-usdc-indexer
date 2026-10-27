@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USDC Indexer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #18202b; --muted: #5b6573; --line: #e3e6ea;
+    --accent: #2563eb; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --pending: #b45309; --safe: #2563eb; --final: #15803d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f141b; --card: #171e27; --text: #e6eaf0; --muted: #9aa4b2; --line: #263040;
+      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --pending: #fbbf24; --safe: #60a5fa; --final: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 0.85rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat .label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .value { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width 0.4s; }
+  .addr { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85rem; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.78rem; border: 1px solid currentColor; }
+  .pending { color: var(--pending); } .safe { color: var(--safe); } .finalized { color: var(--final); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; border-top: none; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>USDC Indexer</h1>
+  <div class="muted small" id="subtitle">Loading…</div>
+
+  <section class="card">
+    <h2>Sync</h2>
+    <div class="grid" id="sync"></div>
+    <div class="bar" title="Indexed share of the way from the start block to the chain head"><div id="progress"></div></div>
+    <div class="muted small" id="sync-note" style="margin-top:8px"></div>
+  </section>
+
+  <div id="addresses"></div>
+  <p class="muted small">Refreshes every 5 seconds. JSON: <a href="v1/status">/v1/status</a> · Metrics: <a href="metrics">/metrics</a></p>
+</main>
+<script>
+const explorers = { 8453: "https://basescan.org", 84532: "https://sepolia.basescan.org" };
+let startBlock = null;
+
+const el = (tag, attrs = {}, ...children) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+};
+const fmt = (n) => Number(n).toLocaleString("en-US");
+const short = (h) => h.slice(0, 10) + "…" + h.slice(-6);
+const ago = (iso) => {
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s < 90) return Math.round(s) + "s ago";
+  if (s < 5400) return Math.round(s / 60) + " min ago";
+  if (s < 172800) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+};
+const stat = (label, value) => el("div", { class: "stat" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value));
+
+async function getJSON(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(path + ": " + res.status);
+  return res.json();
+}
+
+async function refresh() {
+  try {
+    const st = await getJSON("v1/status");
+    const explorer = explorers[st.chainId];
+    document.getElementById("subtitle").textContent =
+      `${st.network} (chain ${st.chainId}) · token ${st.token} · credits at ${st.confirmAt}`;
+
+    const sync = document.getElementById("sync");
+    sync.replaceChildren(
+      stat("Chain head", fmt(st.latestBlock)),
+      stat("Indexed", fmt(st.indexedBlock)),
+      stat("Safe", fmt(st.safeBlock)),
+      stat("Finalized", fmt(st.finalizedBlock)),
+      stat("Behind", fmt(st.lagBlocks) + " blocks"),
+    );
+    if (st.indexedBlock && startBlock === null) startBlock = st.indexedBlock;
+    const span = st.latestBlock - (startBlock ?? st.indexedBlock);
+    const pct = span > 0 ? 100 * (st.indexedBlock - startBlock) / span : 100;
+    document.getElementById("progress").style.width = (st.lagBlocks <= 3 ? 100 : Math.max(2, pct)) + "%";
+    document.getElementById("sync-note").textContent = st.lagBlocks <= 3
+      ? "Caught up with the chain head. New transfers appear within seconds as pending."
+      : `Catching up: ${fmt(st.lagBlocks)} blocks to go (Base makes one block every 2 seconds).`;
+
+    const wrap = document.getElementById("addresses");
+    const cards = [];
+    for (const a of st.watching) {
+      const [sum, tx] = await Promise.all([
+        getJSON(`v1/addresses/${a}`),
+        getJSON(`v1/addresses/${a}/transfers?limit=10`),
+      ]);
+      cards.push(addressCard(a, sum, tx.transfers, explorer));
+    }
+    wrap.replaceChildren(...cards);
+  } catch (e) {
+    document.getElementById("subtitle").replaceChildren(el("span", { class: "err" }, "Cannot reach the indexer API: " + e.message));
+  }
+}
+
+function addressCard(a, sum, transfers, explorer) {
+  const rec = sum.lastReconciliation;
+  const recText = rec
+    ? el("span", { class: rec.ok ? "ok" : "bad" }, rec.ok
+        ? `✓ matches balanceOf at block ${fmt(rec.block)}`
+        : `✗ mismatch at block ${fmt(rec.block)}: on chain ${rec.onchain.usdc}, indexed ${rec.expected.usdc}`)
+    : el("span", { class: "muted" }, "waiting for the first finalized block");
+
+  const rows = transfers.map((t) => {
+    const other = t.direction === "in" ? t.from : t.to;
+    const txLink = explorer ? el("a", { href: `${explorer}/tx/${t.txHash}`, target: "_blank", rel: "noopener" }, short(t.txHash)) : short(t.txHash);
+    return el("tr", {},
+      el("td", {}, ago(t.blockTime)),
+      el("td", {}, t.direction === "in" ? "⬇ in" : t.direction === "out" ? "⬆ out" : "↺ self"),
+      el("td", { class: "num" }, t.amount.usdc),
+      el("td", { class: "addr" }, t.direction === "self" ? "—" : short(other)),
+      el("td", {}, el("span", { class: `pill ${t.status}` }, t.status)),
+      el("td", { class: "num" }, fmt(t.blockNumber)),
+      el("td", {}, txLink),
+    );
+  });
+
+  return el("section", { class: "card" },
+    el("h2", { class: "addr" }, a),
+    el("div", { class: "grid" },
+      stat("Indexed balance", sum.indexedBalance ? sum.indexedBalance.usdc + " USDC" : "—"),
+      stat("Received (final)", sum.finalized.received.usdc),
+      stat("Sent (final)", sum.finalized.sent.usdc),
+      stat("Final transfers", fmt(sum.finalized.count)),
+    ),
+    el("p", { class: "small" }, "Reconciliation: ", recText),
+    rows.length
+      ? el("div", { class: "table-wrap" }, el("table", {},
+          el("thead", {}, el("tr", {}, ...["When", "Direction", "USDC", "Counterparty", "Status", "Block", "Tx"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, ...rows)))
+      : el("p", { class: "muted small" }, "No transfers indexed yet."),
+  );
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 package api
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,9 @@ import (
 	"github.com/BrianLiu0531/base-usdc-indexer/internal/usdc"
 )
 
+//go:embed dashboard.html
+var dashboard []byte
+
 type Server struct {
 	Store     *store.Store
 	Network   usdc.Network
@@ -30,6 +34,10 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(dashboard)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	mux.HandleFunc("GET /v1/status", s.status)
 	mux.HandleFunc("GET /v1/addresses/{address}", s.address)
