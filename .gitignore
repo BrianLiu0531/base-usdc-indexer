@@ -1,0 +1,5 @@
+.env
+*.exe
+/indexer
+/bin/
+coverage.out
