@@ -71,5 +71,8 @@ func Range(from, to uint64) []uint64 {
 	return out
 }
 
+// ErrNodeBehind means the node answering a request has not reached the requested block yet.
+var ErrNodeBehind = errors.New("node is behind")
+
 // ErrNotFound means the requested block does not exist on the node's current chain.
 var ErrNotFound = errors.New("block not found")

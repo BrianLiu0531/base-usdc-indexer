@@ -226,7 +226,16 @@ func (c *RPC) Transfers(ctx context.Context, token common.Address, watch []commo
 			Topics:    q,
 		}
 		var logs []rpcLog
-		err := c.do(ctx, "eth_getLogs", 1, func(ctx context.Context, ep *endpoint) error {
+		err := c.do(ctx, "eth_getLogs", 2, func(ctx context.Context, ep *endpoint) error {
+			// Many nodes answer a range past their head with the logs they have, silently dropping the rest.
+			// Behind a load balancer each request may hit a different node, so check the same endpoint first.
+			var head hexutil.Uint64
+			if err := ep.rpc.CallContext(ctx, &head, "eth_blockNumber"); err != nil {
+				return err
+			}
+			if uint64(head) < to {
+				return fmt.Errorf("%w: node head %d is below requested block %d", ErrNodeBehind, head, to)
+			}
 			logs = nil
 			return ep.rpc.CallContext(ctx, &logs, "eth_getLogs", toFilterArg(query))
 		})

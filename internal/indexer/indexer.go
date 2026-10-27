@@ -185,12 +185,19 @@ func (ix *Indexer) idle(ctx context.Context, cur *chain.Header, tips chain.Tips)
 	if cur == nil {
 		return StepResult{CaughtUp: true}, nil
 	}
-	h, err := ix.chain.Header(ctx, cur.Number)
-	if errors.Is(err, chain.ErrNotFound) || (err == nil && h.Hash != cur.Hash) {
-		return ix.rewind(ctx, cur)
+	if tips.Latest < cur.Number {
+		// The node is behind us. That is far more common (a lagging node behind a load balancer, or a
+		// failover) than a reorg that shortens the chain, and the two look the same. Only rewind on
+		// positive evidence: a hash mismatch once the node has a block at our height again.
+		ix.log.Debug("node is behind the cursor, waiting", "node_head", tips.Latest, "cursor", cur.Number)
+		return StepResult{CaughtUp: true}, nil
 	}
+	h, err := ix.chain.Header(ctx, cur.Number)
 	if err != nil {
-		return StepResult{}, err
+		return StepResult{}, err // includes ErrNotFound from an inconsistent node: retry, never rewind
+	}
+	if h.Hash != cur.Hash {
+		return ix.rewind(ctx, cur)
 	}
 	res, err := ix.store.Apply(ctx, store.Batch{Parent: cur, Tips: tips, ConfirmAt: ix.cfg.ConfirmAt})
 	if err != nil {
@@ -325,10 +332,10 @@ func (ix *Indexer) rewind(ctx context.Context, cur *chain.Header) (StepResult, e
 			return StepResult{}, fmt.Errorf("%w: block %d no longer matches the chain", store.ErrBelowFinalized, stored.Number)
 		}
 		h, err := ix.chain.Header(ctx, stored.Number)
-		if err != nil && !errors.Is(err, chain.ErrNotFound) {
-			return StepResult{}, err
+		if err != nil {
+			return StepResult{}, err // a missing block below the node's head means an inconsistent node: retry
 		}
-		if err == nil && h.Hash == stored.Hash {
+		if h.Hash == stored.Hash {
 			ancestor = stored.Number
 			break
 		}

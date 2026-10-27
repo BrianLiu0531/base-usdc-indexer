@@ -349,7 +349,9 @@ func (s *Store) emitConfirmations(ctx context.Context, tx pgx.Tx, level Level) (
 			RETURNING *
 		)
 		INSERT INTO outbox (event_id, type, payload)
-		SELECT `+eventPayload("transfer.confirmed", "c")+` FROM c ORDER BY c.block_number, c.log_index
+		SELECT `+eventPayload("transfer.confirmed", "c")+` FROM c
+		WHERE c.value > 0 -- zero-value transfers (e.g. address-poisoning spam) are stored but not announced
+		ORDER BY c.block_number, c.log_index
 		ON CONFLICT (event_id) DO NOTHING`, s.chainID, int16(level))
 	if err != nil {
 		return 0, fmt.Errorf("emit confirmations: %w", err)
@@ -379,7 +381,7 @@ func (s *Store) Rewind(ctx context.Context, expected *chain.Header, ancestor uin
 				SELECT chain_id, block_number, block_hash, tx_hash, log_index, from_address, to_address, value, confirmed_at IS NOT NULL FROM gone
 			), events AS (
 				INSERT INTO outbox (event_id, type, payload)
-				SELECT `+eventPayload("transfer.reverted", "gone")+` FROM gone WHERE gone.confirmed_at IS NOT NULL
+				SELECT `+eventPayload("transfer.reverted", "gone")+` FROM gone WHERE gone.confirmed_at IS NOT NULL AND gone.value > 0
 				ON CONFLICT (event_id) DO NOTHING
 			)
 			SELECT count(*) FROM gone`, s.chainID, int64(ancestor)).Scan(&orphaned); err != nil {

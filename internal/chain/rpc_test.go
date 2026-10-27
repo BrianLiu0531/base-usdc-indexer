@@ -103,6 +103,9 @@ func TestTransfersQueriesBothDirectionsAndMergesDuplicates(t *testing.T) {
 	}
 	var filters []map[string]any
 	srv := rpcServer(t, func(method string, params []json.RawMessage) (any, error) {
+		if method == "eth_blockNumber" {
+			return "0x64", nil
+		}
 		var f map[string]any
 		_ = json.Unmarshal(params[0], &f)
 		filters = append(filters, f)
@@ -126,9 +129,26 @@ func TestTransfersQueriesBothDirectionsAndMergesDuplicates(t *testing.T) {
 	if len(filters) != 2 || filters[0]["fromBlock"] != "0x1" || filters[0]["toBlock"] != "0xa" {
 		t.Fatalf("filters %v", filters)
 	}
+	// Only the official token contract is queried, so look-alike tokens never match
+	if addrs := filters[0]["address"].([]any); len(addrs) != 1 || addrs[0] != (common.Address{1}).Hex() {
+		t.Fatalf("address filter %v", filters[0]["address"])
+	}
 	second := filters[1]["topics"].([]any)
 	if second[1] != nil || len(second[2].([]any)) != 2 {
 		t.Fatalf("to-filter topics %v", second)
+	}
+}
+
+func TestIgnoresLogsFromANodeBehindTheRange(t *testing.T) {
+	behind := rpcServer(t, func(method string, _ []json.RawMessage) (any, error) {
+		if method == "eth_blockNumber" {
+			return "0x5", nil // has only reached block 5
+		}
+		return []any{}, nil // would silently return nothing for blocks 6-10
+	})
+	_, err := dial(t, behind.URL).Transfers(context.Background(), common.Address{1}, []common.Address{{2}}, 1, 10)
+	if !errors.Is(err, ErrNodeBehind) {
+		t.Fatalf("got %v, want ErrNodeBehind", err)
 	}
 }
 

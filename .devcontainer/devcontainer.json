@@ -1,0 +1,18 @@
+{
+  "name": "base-usdc-indexer",
+  "image": "mcr.microsoft.com/devcontainers/go:1",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Indexer API", "onAutoForward": "notify" }
+  },
+  "postCreateCommand": "cp -n .env.example .env && docker compose up -d db && go mod download",
+  "postAttachCommand": "echo 'Ready. Try: go test ./...   or   docker compose up --build   then open the forwarded port 8080 at /v1/status'",
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    }
+  }
+}

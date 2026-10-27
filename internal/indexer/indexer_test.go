@@ -130,7 +130,7 @@ func assertMatchesChain(t *testing.T, s *store.Store, f *chaintest.Fake, start u
 	for _, g := range got {
 		key := fmt.Sprintf("%s:%d:%s", g.TxHash, g.LogIndex, g.BlockHash)
 		want := 0
-		if g.Confirmed {
+		if g.Confirmed && g.Value.Sign() > 0 {
 			want = 1
 		}
 		if credited[key] != want {
@@ -256,9 +256,111 @@ func TestDetectsReorgWithoutNewBlocks(t *testing.T) {
 	sync(t, ix)
 	assertMatchesChain(t, s, f, 1, store.Finalized)
 
+	// A shorter chain looks exactly like a node that is behind, so nothing is rewound yet...
+	cur, _ := s.Cursor(context.Background())
 	f.Reorg(2)
 	f.MineEmpty(1)
 	sync(t, ix)
+	if after, _ := s.Cursor(context.Background()); after.Hash != cur.Hash {
+		t.Fatal("rewound without evidence of a reorg")
+	}
+	// ...until the chain grows past the cursor and the parent hash proves the fork
+	f.MineEmpty(2)
+	sync(t, ix)
+	assertMatchesChain(t, s, f, 1, store.Finalized)
+}
+
+// lagging is a node that has only reached block head, as served by a load balancer or a failover endpoint.
+type lagging struct {
+	*chaintest.Fake
+	head uint64
+}
+
+func (l *lagging) Tips(ctx context.Context) (chain.Tips, error) {
+	tips, err := l.Fake.Tips(ctx)
+	return chain.Tips{Latest: min(tips.Latest, l.head), Safe: min(tips.Safe, l.head), Finalized: min(tips.Finalized, l.head)}, err
+}
+
+func (l *lagging) Header(ctx context.Context, n uint64) (chain.Header, error) {
+	if n > l.head {
+		return chain.Header{}, chain.ErrNotFound
+	}
+	return l.Fake.Header(ctx, n)
+}
+
+func TestWaitsForALaggingNode(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t, chainID)
+	f := chaintest.New(chainID, 1)
+	for range 10 {
+		f.Mine(chaintest.Spec{From: carol, To: alice, Value: 1})
+	}
+	sync(t, newIndexer(f, s, func(c *Config) { c.ConfirmAt = store.Pending }))
+
+	// Fail over to a node 4 blocks behind: the indexer must wait, not treat the missing blocks as a reorg
+	slow := newIndexer(&lagging{Fake: f, head: 6}, s, func(c *Config) { c.ConfirmAt = store.Pending })
+	for range 5 {
+		res, err := slow.Step(ctx)
+		if err != nil || !res.CaughtUp || res.Reorg {
+			t.Fatalf("step on lagging node: %+v, %v", res, err)
+		}
+	}
+	events, _ := s.OutboxEvents(ctx)
+	for _, e := range events {
+		if e.Type == "transfer.reverted" {
+			t.Fatal("a lagging node caused a revert")
+		}
+	}
+	assertMatchesChain(t, s, f, 1, store.Pending)
+}
+
+func TestZeroValueTransfersAreStoredButNotAnnounced(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t, chainID)
+	f := chaintest.New(chainID, 1)
+	// Address poisoning: a 0-value transferFrom makes a look-alike address appear in the victim's history
+	f.Mine(chaintest.Spec{From: alice, To: dave, Value: 0}, chaintest.Spec{From: carol, To: alice, Value: 10})
+	f.SetFinality(1, 1)
+	sync(t, newIndexer(f, s))
+	assertMatchesChain(t, s, f, 1, store.Finalized)
+	if events, _ := s.OutboxEvents(ctx); len(events) != 1 {
+		t.Fatalf("got %d events, want 1 (the zero-value transfer must not be announced)", len(events))
+	}
+}
+
+// TestConcurrentIndexersNeverDuplicate runs two indexers against one database at the same time,
+// the indexer's equivalent of two requests settling the same bet at once.
+func TestConcurrentIndexersNeverDuplicate(t *testing.T) {
+	s := storetest.Open(t, chainID)
+	f := chaintest.New(chainID, 1)
+	for i := range 120 {
+		f.Mine(chaintest.Spec{From: carol, To: alice, Value: int64(i + 1)}, chaintest.Spec{From: bob, To: dave, Value: 1})
+	}
+	f.SetFinality(115, 100)
+
+	errs := make(chan error, 2)
+	for range 2 {
+		ix := newIndexer(f, s, func(c *Config) { c.MaxRange = 7 })
+		go func() {
+			for range 5000 {
+				res, err := ix.Step(context.Background())
+				if err != nil && !errors.Is(err, store.ErrCursorMoved) {
+					errs <- err
+					return
+				}
+				if err == nil && res.CaughtUp {
+					errs <- nil
+					return
+				}
+			}
+			errs <- errors.New("did not catch up")
+		}()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
 	assertMatchesChain(t, s, f, 1, store.Finalized)
 }
 
