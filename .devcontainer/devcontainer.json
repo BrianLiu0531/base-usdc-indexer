@@ -1,16 +1,14 @@
 {
   "name": "base-usdc-indexer",
-  "image": "mcr.microsoft.com/devcontainers/go:1",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
-  },
+  // The Codespaces default image: Go and Docker are preinstalled, so nothing extra has to build
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
   "forwardPorts": [8080],
   "portsAttributes": {
     "8080": { "label": "Indexer dashboard", "onAutoForward": "openBrowser" }
   },
-  "postCreateCommand": "cp -n .env.example .env && go mod download",
+  "postCreateCommand": "[ -f .env ] || cp .env.example .env",
   "postStartCommand": "docker compose up -d --build",
-  "postAttachCommand": "echo 'The indexer is starting (first build takes about a minute). Open the Ports tab and click the globe icon next to port 8080. Logs: docker compose logs -f indexer   Tests: go test ./...'",
+  "postAttachCommand": "echo 'The indexer is starting (first build takes 1-2 minutes). Open the Ports tab and click the globe next to port 8080. Logs: docker compose logs -f indexer   Tests: go test ./...'",
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"]
