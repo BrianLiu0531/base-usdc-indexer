@@ -33,6 +33,7 @@ type Config struct {
 	RPCTimeout          time.Duration
 	LogLevel            slog.Level
 	LogJSON             bool
+	OutboxSQSQueueURL   string // publish outbox events to this SQS FIFO queue instead of the log
 }
 
 // FromEnv loads the configuration; see .env.example for every variable.
@@ -51,6 +52,7 @@ func FromEnv() (Config, error) {
 		RPCMaxAttempts:      int(e.uint("RPC_MAX_ATTEMPTS", 5)),
 		RPCTimeout:          e.duration("RPC_TIMEOUT", 15*time.Second),
 		LogJSON:             e.str("LOG_FORMAT", "json", false) == "json",
+		OutboxSQSQueueURL:   e.str("OUTBOX_SQS_QUEUE_URL", "", false),
 	}
 
 	network, err := usdc.Lookup(e.str("NETWORK", "base-sepolia", false))

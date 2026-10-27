@@ -114,7 +114,7 @@ For mainnet set `NETWORK=base`. Use a provider such as Alchemy or QuickNode, sin
 
 ```bash
 docker compose up -d db
-go test ./...                                                    # 27 tests
+go test ./...                                                    # 30 tests
 SOAK_SEEDS=500 go test -run Randomised ./internal/indexer        # longer simulation
 ```
 
@@ -153,7 +153,12 @@ internal/outbox      outbox relay and publishers
 internal/api         HTTP API
 ```
 
+## Downstream: crediting on AWS
+
+Set `OUTBOX_SQS_QUEUE_URL` and the relay publishes to an **SQS FIFO** queue instead of the log. The message group is the transfer, so its events stay in order, and the deduplication ID is a hash of the event ID.
+
+**[usdc-deposit-ledger](https://github.com/BrianLiu0531/usdc-deposit-ledger)** consumes the queue with a Go Lambda function and credits accounts in DynamoDB exactly once, using conditional transactional writes. It handles partial batch failures and a dead-letter queue, uses Terraform for infrastructure, and deploys through GitHub OIDC. The two services were verified together against live Base Sepolia traffic.
+
 ## Next
 
-- **SQS publisher + Lambda consumer.** The outbox relay publishes to an SQS FIFO queue (message group per transfer). A Go Lambda credits deposits idempotently with DynamoDB conditional writes, using partial batch failure reporting and a dead-letter queue. Infrastructure is in Terraform, deployed from GitHub Actions with OIDC.
 - Watch-list changes without re-indexing (per-address start blocks).

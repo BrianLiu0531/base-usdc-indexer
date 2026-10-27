@@ -33,7 +33,7 @@ Every failure mode considered, how it is handled, and the test that covers it.
 | 14 | Two indexer instances writing at the same time | ✅ | An advisory transaction lock plus an optimistic cursor check: the loser gets `ErrCursorMoved` and retries. | `TestConcurrentIndexersNeverDuplicate` |
 | 15 | Crash in the middle of a batch | ☑️ | One PostgreSQL transaction: either everything commits or nothing does. | — |
 | 16 | A transfer reaches the confirmation level in the same batch it was inserted | ✅ | Confirmations are emitted after the insert, in the same transaction. | `TestIndexesEachWatchedTransferOnce` |
-| 17 | The outbox relay crashes after publishing but before marking events sent | ➡️ | Delivery is at-least-once. `eventId` is deterministic, and consumers must deduplicate on it (the Lambda consumer will use a DynamoDB conditional write). | `TestPublishesEachEventOnceInOrder` (marking) |
+| 17 | The outbox relay crashes after publishing but before marking events sent | ➡️ | Delivery is at-least-once. `eventId` is deterministic and consumers deduplicate on it. SQS FIFO drops resends within 5 minutes, and [usdc-deposit-ledger](https://github.com/BrianLiu0531/usdc-deposit-ledger) uses a DynamoDB conditional write after that. | `TestPublishesEachEventOnceInOrder`, `TestSQSPublisherBatchesGroupsAndDeduplicates`, ledger's `TestConcurrentDuplicatesApplyOnce` |
 | 18 | The message bus is down | ✅ | Events stay pending and are retried with backoff. | `TestPublishesEachEventOnceInOrder` |
 | 19 | Several relays at once | ☑️ | `FOR UPDATE SKIP LOCKED` prevents double sends, but cross-relay ordering is not guaranteed. Run one relay, or use a FIFO queue grouped per transfer. | — |
 

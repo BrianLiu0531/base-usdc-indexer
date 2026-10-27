@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"golang.org/x/sync/errgroup"
@@ -80,7 +82,17 @@ func run() error {
 		Token: cfg.Network.USDC, Watch: cfg.Watch, StartBlock: cfg.StartBlock, MaxRange: cfg.MaxBlockRange,
 		MaxUnfinalizedBatch: cfg.MaxUnfinalizedBatch, ConfirmAt: cfg.ConfirmAt, PollInterval: cfg.PollInterval,
 	}, rpc, st, log)
-	relay := &outbox.Relay{Store: st, Publisher: outbox.LogPublisher{Log: log}, BatchSize: 100, Interval: time.Second, Log: log}
+	var publisher outbox.Publisher = outbox.LogPublisher{Log: log}
+	if cfg.OutboxSQSQueueURL != "" {
+		// Credentials and region come from the usual AWS sources (env vars, profile, or an IAM role)
+		awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
+		if err != nil {
+			return fmt.Errorf("load AWS config: %w", err)
+		}
+		publisher = outbox.SQSPublisher{Client: sqs.NewFromConfig(awsCfg), QueueURL: cfg.OutboxSQSQueueURL}
+		log.Info("publishing events to SQS", "queue", cfg.OutboxSQSQueueURL)
+	}
+	relay := &outbox.Relay{Store: st, Publisher: publisher, BatchSize: 100, Interval: time.Second, Log: log}
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           (&api.Server{Store: st, Network: cfg.Network, Watch: cfg.Watch, ConfirmAt: cfg.ConfirmAt, Metrics: reg, Log: log}).Handler(),
